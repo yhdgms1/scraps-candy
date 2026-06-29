@@ -1,0 +1,10 @@
+[package]
+name = "scraps-candy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.103"
+ctrlc = "3.5.2"
+dxgi-capture-rs = "1.2.2"
+enigo = "0.6.1"
