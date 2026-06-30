@@ -1,5 +1,6 @@
 use anyhow::Result;
 use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use dxgi_capture_rs::{CaptureError, DXGIManager};
 use enigo::{Direction, Enigo, Key, Keyboard, Settings as EnigoSettings};
 use std::sync::Arc;
@@ -99,6 +100,11 @@ impl CircleSearchState {
 }
 
 fn main() -> Result<()> {
+    ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build_global()
+        .unwrap();
+
     let mut enigo = Enigo::new(&EnigoSettings::default()).unwrap();
 
     let running = Arc::new(AtomicBool::new(true));
@@ -147,11 +153,14 @@ fn main() -> Result<()> {
                     (raw[offset + 2], raw[offset + 1], raw[offset])
                 };
 
-                let mut found = false;
+                let found = AtomicBool::new(false);
 
-                for y in (0..h).step_by(25) {
+                (0..h).step_by(25).collect::<Vec<usize>>().par_iter().any(|&y| {
+                    if found.load(Ordering::Relaxed) {
+                        return false;
+                    }
+
                     let mut search_state = CircleSearchState::default();
-
                     let mut x = 0;
 
                     while x < w {
@@ -166,8 +175,9 @@ fn main() -> Result<()> {
                         search_state = CircleSearchState::next(search_state, (r, g, b));
 
                         if let CircleSearchState::Found = search_state {
-                            found = true;
-                            break;
+                            found.store(true, Ordering::Relaxed);
+
+                            return true;
                         }
                         
                         let step = match search_state {
@@ -178,18 +188,17 @@ fn main() -> Result<()> {
                         x += step;
                     }
 
-                    if search_state == CircleSearchState::Found {
-                        break;
-                    }
-                }
+                    return false;
+                }); 
 
-                if found {
+                if found.load(Ordering::Acquire) {
                     last_fired = Some(Instant::now());
 
                     let _ = enigo.key(Key::Space, Direction::Press);
                     thread::sleep(Duration::from_millis(30));
                     let _ = enigo.key(Key::Space, Direction::Release);
 
+                    println!();
                     println!("Circle found");
                 }
             }
