@@ -22,7 +22,7 @@ enum CircleSearchState {
 
 impl Default for CircleSearchState {
     fn default() -> Self {
-        CircleSearchState::LookingForOpeningGrayCircle
+        Self::LookingForOpeningGrayCircle
     }
 }
 
@@ -99,6 +99,91 @@ impl CircleSearchState {
     }
 }
 
+#[derive(PartialEq)]
+enum LineSearchState {
+    LookingForLightestCorner,
+    LookingForWideMatchingZoneStart,
+    LookingForNarrowMatchingZoneStart,
+    LookingForArrow,
+    LookingForNarrowMatchingZoneEnd,
+    LookingForWideMatchingZoneEnd,
+    LookingForDarkestCorner,
+    Found
+}
+
+impl Default for LineSearchState {
+    fn default() -> Self {
+        Self::LookingForLightestCorner
+    }
+}
+
+impl LineSearchState {
+    fn is_narrow_matching_zone((r, g, b): (u8, u8, u8)) -> bool {
+        r > 0x9c && g > 0x9c && b < 0x1f
+    }
+
+    fn is_wide_matching_zone((r, g, b): (u8, u8, u8)) -> bool {
+        r < 0xfb && r > 0x91 && g < 0xfb && g > 0x91 && b < 0xfb && b > 0x91
+    }
+
+    fn next(current: Self, (r, g, b): (u8, u8, u8)) -> Self {
+        match current {
+            Self::LookingForLightestCorner => {
+                if r == 0x2f && g == 0x2f && b == 0x2f {
+                    Self::LookingForWideMatchingZoneStart
+                } else {
+                    current
+                }
+            },
+            Self::LookingForWideMatchingZoneStart => {
+                if Self::is_wide_matching_zone((r, g, b)) {
+                    Self::LookingForNarrowMatchingZoneStart
+                } else {
+                    current
+                }
+            },
+            Self::LookingForNarrowMatchingZoneStart => {
+                if Self::is_narrow_matching_zone((r, g, b)) {
+                    Self::LookingForArrow
+                } else {
+                    current
+                }
+            },
+            Self::LookingForArrow => {
+                if r == 0xff && g == 0x57 && b == 0x5a {
+                    Self::LookingForNarrowMatchingZoneEnd
+                } else {
+                    current
+                }
+            },
+            Self::LookingForNarrowMatchingZoneEnd => {
+                if Self::is_narrow_matching_zone((r, g, b)) {
+                    Self::LookingForWideMatchingZoneEnd
+                } else {
+                    current
+                }
+            },
+            Self::LookingForWideMatchingZoneEnd => {
+                if Self::is_wide_matching_zone((r, g, b)) {
+                    Self::LookingForDarkestCorner
+                } else {
+                    current
+                }
+            },
+            Self::LookingForDarkestCorner => {
+                if r == 0x19 && g == 0x19 && b == 0x19 {
+                    Self::Found
+                } else {
+                    current
+                }
+            },
+            Self::Found => {
+                current
+            }
+        }
+    }
+}
+
 fn main() -> Result<()> {
     ThreadPoolBuilder::new()
         .num_threads(4)
@@ -160,7 +245,8 @@ fn main() -> Result<()> {
                         return false;
                     }
 
-                    let mut search_state = CircleSearchState::default();
+                    let mut search_state_circle = CircleSearchState::default();
+                    let mut search_state_line = LineSearchState::default();
                     let mut x = 0;
 
                     while x < w {
@@ -172,16 +258,26 @@ fn main() -> Result<()> {
 
                         let (r, g, b) = get_rgb(offset);
 
-                        search_state = CircleSearchState::next(search_state, (r, g, b));
+                        search_state_circle = CircleSearchState::next(search_state_circle, (r, g, b));
+                        search_state_line = LineSearchState::next(search_state_line, (r, g, b));
 
-                        if let CircleSearchState::Found = search_state {
+                        if let CircleSearchState::Found = search_state_circle {
+                            println!("\rНайден круг");
+
                             found.store(true, Ordering::Relaxed);
+                            return true;
+                        }
 
+                        if let LineSearchState::Found = search_state_line {
+                            println!("\rНайдена линия");
+
+                            found.store(true, Ordering::Relaxed);
                             return true;
                         }
                         
-                        let step = match search_state {
-                            CircleSearchState::LookingForOpeningGrayCircle => 35,
+                        // У круга минимальный шаг 35
+                        let step = match search_state_line {
+                            LineSearchState::LookingForLightestCorner => 8,
                             _ => 1,
                         };
 
@@ -197,9 +293,6 @@ fn main() -> Result<()> {
                     let _ = enigo.key(Key::Space, Direction::Press);
                     thread::sleep(Duration::from_millis(30));
                     let _ = enigo.key(Key::Space, Direction::Release);
-
-                    println!();
-                    println!("Circle found");
                 }
             }
 
