@@ -1,8 +1,8 @@
 use anyhow::Result;
-use rayon::prelude::*;
-use rayon::ThreadPoolBuilder;
 use dxgi_capture_rs::{CaptureError, DXGIManager};
 use enigo::{Direction, Enigo, Key, Keyboard, Settings as EnigoSettings};
+use rayon::ThreadPoolBuilder;
+use rayon::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -92,9 +92,7 @@ impl CircleSearchState {
                     current
                 }
             }
-            Self::Found => {
-                current
-            }
+            Self::Found => current,
         }
     }
 }
@@ -108,7 +106,7 @@ enum LineSearchState {
     LookingForNarrowMatchingZoneEnd,
     LookingForWideMatchingZoneEnd,
     LookingForDarkestCorner,
-    Found
+    Found,
 }
 
 impl Default for LineSearchState {
@@ -134,52 +132,50 @@ impl LineSearchState {
                 } else {
                     current
                 }
-            },
+            }
             Self::LookingForWideMatchingZoneStart => {
                 if Self::is_wide_matching_zone((r, g, b)) {
                     Self::LookingForNarrowMatchingZoneStart
                 } else {
                     current
                 }
-            },
+            }
             Self::LookingForNarrowMatchingZoneStart => {
                 if Self::is_narrow_matching_zone((r, g, b)) {
                     Self::LookingForArrow
                 } else {
                     current
                 }
-            },
+            }
             Self::LookingForArrow => {
                 if r == 0xff && g == 0x57 && b == 0x5a {
                     Self::LookingForNarrowMatchingZoneEnd
                 } else {
                     current
                 }
-            },
+            }
             Self::LookingForNarrowMatchingZoneEnd => {
                 if Self::is_narrow_matching_zone((r, g, b)) {
                     Self::LookingForWideMatchingZoneEnd
                 } else {
                     current
                 }
-            },
+            }
             Self::LookingForWideMatchingZoneEnd => {
                 if Self::is_wide_matching_zone((r, g, b)) {
                     Self::LookingForDarkestCorner
                 } else {
                     current
                 }
-            },
+            }
             Self::LookingForDarkestCorner => {
                 if r == 0x19 && g == 0x19 && b == 0x19 {
                     Self::Found
                 } else {
                     current
                 }
-            },
-            Self::Found => {
-                current
             }
+            Self::Found => current,
         }
     }
 }
@@ -198,13 +194,11 @@ fn main() -> Result<()> {
     ctrlc::set_handler(move || {
         r.store(false, Ordering::SeqCst);
     })
-    .expect("Error setting Ctrl-C handler");
+    .unwrap();
 
     let mut manager = DXGIManager::new(5)?;
 
-    let (width, height) = manager.geometry();
-    println!("DXGI capture started — {}x{}", width, height);
-    println!("Press Ctrl+C to stop.");
+    println!("Ctrl+C to stop.");
 
     let mut i: u64 = 0;
     let mut last_fired: Option<Instant> = None;
@@ -240,52 +234,57 @@ fn main() -> Result<()> {
 
                 let found = AtomicBool::new(false);
 
-                (0..h).step_by(25).collect::<Vec<usize>>().par_iter().any(|&y| {
-                    if found.load(Ordering::Relaxed) {
+                (0..h)
+                    .step_by(25)
+                    .collect::<Vec<usize>>()
+                    .par_iter()
+                    .any(|&y| {
+                        if found.load(Ordering::Relaxed) {
+                            return false;
+                        }
+
+                        let mut search_state_circle = CircleSearchState::default();
+                        let mut search_state_line = LineSearchState::default();
+                        let mut x = 0;
+
+                        while x < w {
+                            let offset = y * stride + x * 4;
+
+                            if offset + 3 >= raw.len() {
+                                break;
+                            }
+
+                            let (r, g, b) = get_rgb(offset);
+
+                            search_state_circle =
+                                CircleSearchState::next(search_state_circle, (r, g, b));
+                            search_state_line = LineSearchState::next(search_state_line, (r, g, b));
+
+                            if let CircleSearchState::Found = search_state_circle {
+                                println!("\rНайден круг");
+
+                                found.store(true, Ordering::Relaxed);
+                                return true;
+                            }
+
+                            if let LineSearchState::Found = search_state_line {
+                                println!("\rНайдена линия");
+
+                                found.store(true, Ordering::Relaxed);
+                                return true;
+                            }
+
+                            // У круга минимальный шаг 35. Рассчитывается как длина искомого элемента / 2 чтобы уж точно попасть на него
+                            let step = match search_state_line {
+                                LineSearchState::LookingForLightestCorner => 8,
+                                _ => 1,
+                            };
+
+                            x += step;
+                        }
+
                         return false;
-                    }
-
-                    let mut search_state_circle = CircleSearchState::default();
-                    let mut search_state_line = LineSearchState::default();
-                    let mut x = 0;
-
-                    while x < w {
-                        let offset = y * stride + x * 4;
-
-                        if offset + 3 >= raw.len() {
-                            break;
-                        }
-
-                        let (r, g, b) = get_rgb(offset);
-
-                        search_state_circle = CircleSearchState::next(search_state_circle, (r, g, b));
-                        search_state_line = LineSearchState::next(search_state_line, (r, g, b));
-
-                        if let CircleSearchState::Found = search_state_circle {
-                            println!("\rНайден круг");
-
-                            found.store(true, Ordering::Relaxed);
-                            return true;
-                        }
-
-                        if let LineSearchState::Found = search_state_line {
-                            println!("\rНайдена линия");
-
-                            found.store(true, Ordering::Relaxed);
-                            return true;
-                        }
-                        
-                        // У круга минимальный шаг 35
-                        let step = match search_state_line {
-                            LineSearchState::LookingForLightestCorner => 8,
-                            _ => 1,
-                        };
-
-                        x += step;
-                    }
-
-                    return false;
-                }); 
+                    });
 
                 if found.load(Ordering::Acquire) {
                     last_fired = Some(Instant::now());
