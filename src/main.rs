@@ -1,4 +1,5 @@
 use anyhow::Result;
+use rayon::prelude::*;
 use dxgi_capture_rs::{CaptureError, DXGIManager};
 use enigo::{Direction, Enigo, Key, Keyboard, Settings as EnigoSettings};
 use std::sync::Arc;
@@ -7,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 #[derive(PartialEq)]
-enum SearchState {
+enum CircleSearchState {
     LookingForOpeningGrayCircle,
     LookingForOpeningYellowCircle(usize),
     LookingForOpeningRedCircle,
@@ -15,12 +16,85 @@ enum SearchState {
     LookingForClosingYellowCircle,
     LookingForClosingRedCircle,
     LookingForClosingGrayCircle,
-    SearchComplete,
+    Found,
 }
 
-impl Default for SearchState {
+impl Default for CircleSearchState {
     fn default() -> Self {
-        SearchState::LookingForOpeningGrayCircle
+        CircleSearchState::LookingForOpeningGrayCircle
+    }
+}
+
+impl CircleSearchState {
+    fn is_gray((r, g, b): (u8, u8, u8)) -> bool {
+        r == 0x33 && g == 0x33 && b == 0x33
+    }
+
+    fn is_yellow((r, g, b): (u8, u8, u8)) -> bool {
+        r > 0x9c && g > 0x9c && b < 0x1f
+    }
+
+    fn is_red((r, g, b): (u8, u8, u8)) -> bool {
+        r > 0x9c && g < 0x1f && b < 0x1f
+    }
+
+    fn next(current: Self, (r, g, b): (u8, u8, u8)) -> Self {
+        match current {
+            Self::LookingForOpeningGrayCircle => {
+                if Self::is_gray((r, g, b)) {
+                    Self::LookingForOpeningYellowCircle(0)
+                } else {
+                    current
+                }
+            }
+            Self::LookingForOpeningYellowCircle(len) => {
+                if Self::is_gray((r, g, b)) {
+                    Self::LookingForOpeningYellowCircle(len + 1)
+                } else if len > 10 && Self::is_yellow((r, g, b)) {
+                    Self::LookingForOpeningRedCircle
+                } else {
+                    current
+                }
+            }
+            Self::LookingForOpeningRedCircle => {
+                if Self::is_red((r, g, b)) {
+                    Self::LookingForMiddleGrayCircle
+                } else {
+                    current
+                }
+            }
+            Self::LookingForMiddleGrayCircle => {
+                if Self::is_gray((r, g, b)) {
+                    Self::LookingForClosingRedCircle
+                } else {
+                    current
+                }
+            }
+            Self::LookingForClosingRedCircle => {
+                if Self::is_red((r, g, b)) {
+                    Self::LookingForClosingYellowCircle
+                } else {
+                    current
+                }
+            }
+            Self::LookingForClosingYellowCircle => {
+                if Self::is_yellow((r, g, b)) {
+                    Self::LookingForClosingGrayCircle
+                } else {
+                    current
+                }
+            }
+            Self::LookingForClosingGrayCircle => {
+                if Self::is_gray((r, g, b)) {
+                    Self::Found
+                } else {
+                    current
+                }
+            }
+            Self::Found => {
+                current
+            }
+        }
     }
 }
 
@@ -73,18 +147,10 @@ fn main() -> Result<()> {
                     (raw[offset + 2], raw[offset + 1], raw[offset])
                 };
 
-                let is_gray =
-                    |(r, g, b): (u8, u8, u8)| -> bool { r == 0x33 && g == 0x33 && b == 0x33 };
-
-                let is_yellow =
-                    |(r, g, b): (u8, u8, u8)| -> bool { r > 0x9c && g > 0x9c && b < 0x1f };
-
-                let is_red = |(r, g, b): (u8, u8, u8)| -> bool { r > 0x9c && g < 0x1f && b < 0x1f };
-
                 let mut found = false;
 
                 for y in (0..h).step_by(25) {
-                    let mut search_state = SearchState::default();
+                    let mut search_state = CircleSearchState::default();
 
                     let mut x = 0;
 
@@ -97,62 +163,22 @@ fn main() -> Result<()> {
 
                         let (r, g, b) = get_rgb(offset);
 
-                        match search_state {
-                            SearchState::LookingForOpeningGrayCircle => {
-                                if is_gray((r, g, b)) {
-                                    search_state = SearchState::LookingForOpeningYellowCircle(0);
-                                }
-                            }
-                            SearchState::LookingForOpeningYellowCircle(len) => {
-                                if is_gray((r, g, b)) {
-                                    search_state =
-                                        SearchState::LookingForOpeningYellowCircle(len + 1);
-                                } else if len > 10 {
-                                    if is_yellow((r, g, b)) {
-                                        search_state = SearchState::LookingForOpeningRedCircle;
-                                    }
-                                }
-                            }
-                            SearchState::LookingForOpeningRedCircle => {
-                                if is_red((r, g, b)) {
-                                    search_state = SearchState::LookingForMiddleGrayCircle;
-                                }
-                            }
-                            SearchState::LookingForMiddleGrayCircle => {
-                                if is_gray((r, g, b)) {
-                                    search_state = SearchState::LookingForClosingRedCircle;
-                                }
-                            }
-                            SearchState::LookingForClosingRedCircle => {
-                                if is_red((r, g, b)) {
-                                    search_state = SearchState::LookingForClosingYellowCircle;
-                                }
-                            }
-                            SearchState::LookingForClosingYellowCircle => {
-                                if is_yellow((r, g, b)) {
-                                    search_state = SearchState::LookingForClosingGrayCircle;
-                                }
-                            }
-                            SearchState::LookingForClosingGrayCircle => {
-                                if is_gray((r, g, b)) {
-                                    search_state = SearchState::SearchComplete;
-                                }
-                            }
-                            SearchState::SearchComplete => {
-                                found = true;
-                                break;
-                            }
-                        }
+                        search_state = CircleSearchState::next(search_state, (r, g, b));
 
+                        if let CircleSearchState::Found = search_state {
+                            found = true;
+                            break;
+                        }
+                        
                         let step = match search_state {
-                            SearchState::LookingForOpeningGrayCircle => 35,
+                            CircleSearchState::LookingForOpeningGrayCircle => 35,
                             _ => 1,
                         };
 
                         x += step;
                     }
 
-                    if search_state == SearchState::SearchComplete {
+                    if search_state == CircleSearchState::Found {
                         break;
                     }
                 }
