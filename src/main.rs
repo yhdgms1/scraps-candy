@@ -39,13 +39,13 @@ impl CircleSearchState {
         r > 0x9c && g < 0x1f && b < 0x1f
     }
 
-    fn next(current: Self, (r, g, b): (u8, u8, u8)) -> Self {
-        match current {
+    fn next(self, (r, g, b): (u8, u8, u8)) -> Self {
+        match self {
             Self::LookingForOpeningGrayCircle => {
                 if Self::is_gray((r, g, b)) {
                     Self::LookingForOpeningYellowCircle(0)
                 } else {
-                    current
+                    self
                 }
             }
             Self::LookingForOpeningYellowCircle(len) => {
@@ -54,45 +54,45 @@ impl CircleSearchState {
                 } else if len > 10 && Self::is_yellow((r, g, b)) {
                     Self::LookingForOpeningRedCircle
                 } else {
-                    current
+                    self
                 }
             }
             Self::LookingForOpeningRedCircle => {
                 if Self::is_red((r, g, b)) {
                     Self::LookingForMiddleGrayCircle
                 } else {
-                    current
+                    self
                 }
             }
             Self::LookingForMiddleGrayCircle => {
                 if Self::is_gray((r, g, b)) {
                     Self::LookingForClosingRedCircle
                 } else {
-                    current
+                    self
                 }
             }
             Self::LookingForClosingRedCircle => {
                 if Self::is_red((r, g, b)) {
                     Self::LookingForClosingYellowCircle
                 } else {
-                    current
+                    self
                 }
             }
             Self::LookingForClosingYellowCircle => {
                 if Self::is_yellow((r, g, b)) {
                     Self::LookingForClosingGrayCircle
                 } else {
-                    current
+                    self
                 }
             }
             Self::LookingForClosingGrayCircle => {
                 if Self::is_gray((r, g, b)) {
                     Self::Found
                 } else {
-                    current
+                    self
                 }
             }
-            Self::Found => current,
+            Self::Found => self,
         }
     }
 }
@@ -124,58 +124,58 @@ impl LineSearchState {
         r < 0xfb && r > 0x91 && g < 0xfb && g > 0x91 && b < 0xfb && b > 0x91
     }
 
-    fn next(current: Self, (r, g, b): (u8, u8, u8)) -> Self {
-        match current {
+    fn next(self, (r, g, b): (u8, u8, u8)) -> Self {
+        match self {
             Self::LookingForLightestCorner => {
                 if r == 0x2f && g == 0x2f && b == 0x2f {
                     Self::LookingForWideMatchingZoneStart
                 } else {
-                    current
+                    self
                 }
             }
             Self::LookingForWideMatchingZoneStart => {
                 if Self::is_wide_matching_zone((r, g, b)) {
                     Self::LookingForNarrowMatchingZoneStart
                 } else {
-                    current
+                    self
                 }
             }
             Self::LookingForNarrowMatchingZoneStart => {
                 if Self::is_narrow_matching_zone((r, g, b)) {
                     Self::LookingForArrow
                 } else {
-                    current
+                    self
                 }
             }
             Self::LookingForArrow => {
                 if r == 0xff && g == 0x57 && b == 0x5a {
                     Self::LookingForNarrowMatchingZoneEnd
                 } else {
-                    current
+                    self
                 }
             }
             Self::LookingForNarrowMatchingZoneEnd => {
                 if Self::is_narrow_matching_zone((r, g, b)) {
                     Self::LookingForWideMatchingZoneEnd
                 } else {
-                    current
+                    self
                 }
             }
             Self::LookingForWideMatchingZoneEnd => {
                 if Self::is_wide_matching_zone((r, g, b)) {
                     Self::LookingForDarkestCorner
                 } else {
-                    current
+                    self
                 }
             }
             Self::LookingForDarkestCorner => {
                 if r == 0x19 && g == 0x19 && b == 0x19 {
                     Self::Found
                 } else {
-                    current
+                    self
                 }
             }
-            Self::Found => current,
+            Self::Found => self,
         }
     }
 }
