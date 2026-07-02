@@ -8,14 +8,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 enum CircleSearchState {
     LookingForOpeningGrayCircle,
     LookingForOpeningYellowCircle(usize),
     LookingForOpeningRedCircle,
     LookingForMiddleGrayCircle,
-    LookingForClosingYellowCircle,
     LookingForClosingRedCircle,
+    LookingForClosingYellowCircle,
     LookingForClosingGrayCircle,
     Found,
 }
@@ -31,12 +31,20 @@ impl CircleSearchState {
         r == 0x33 && g == 0x33 && b == 0x33
     }
 
-    fn is_yellow((r, g, b): (u8, u8, u8)) -> bool {
-        r > 0x9c && g > 0x9c && b < 0x1f
+    fn is_opening_yellow_circle((r, g, b): (u8, u8, u8)) -> bool {
+        r > 0x9c && g > 0x9c && b < 0x0b
     }
 
-    fn is_red((r, g, b): (u8, u8, u8)) -> bool {
+    fn is_closing_yellow_circle((r, g, b): (u8, u8, u8)) -> bool {
+        r > 0x9c && g > 0xa6 && b < 0x0b
+    }
+
+    fn is_opening_red_circle((r, g, b): (u8, u8, u8)) -> bool {
         r > 0x9c && g < 0x1f && b < 0x1f
+    }
+
+    fn is_closing_red_circle((r, g, b): (u8, u8, u8)) -> bool {
+        r > 0xb3 && g < 0x1f && b < 0x1f
     }
 
     fn next(self, (r, g, b): (u8, u8, u8)) -> Self {
@@ -51,14 +59,14 @@ impl CircleSearchState {
             Self::LookingForOpeningYellowCircle(len) => {
                 if Self::is_gray((r, g, b)) {
                     Self::LookingForOpeningYellowCircle(len + 1)
-                } else if len > 10 && Self::is_yellow((r, g, b)) {
+                } else if len > 10 && Self::is_opening_yellow_circle((r, g, b)) {
                     Self::LookingForOpeningRedCircle
                 } else {
                     self
                 }
             }
             Self::LookingForOpeningRedCircle => {
-                if Self::is_red((r, g, b)) {
+                if Self::is_opening_red_circle((r, g, b)) {
                     Self::LookingForMiddleGrayCircle
                 } else {
                     self
@@ -72,14 +80,14 @@ impl CircleSearchState {
                 }
             }
             Self::LookingForClosingRedCircle => {
-                if Self::is_red((r, g, b)) {
+                if Self::is_closing_red_circle((r, g, b)) {
                     Self::LookingForClosingYellowCircle
                 } else {
                     self
                 }
             }
             Self::LookingForClosingYellowCircle => {
-                if Self::is_yellow((r, g, b)) {
+                if Self::is_closing_yellow_circle((r, g, b)) {
                     Self::LookingForClosingGrayCircle
                 } else {
                     self
@@ -97,7 +105,7 @@ impl CircleSearchState {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 enum LineSearchState {
     LookingForLightestCorner,
     LookingForWideMatchingZoneStart,
@@ -235,7 +243,7 @@ fn main() -> Result<()> {
                 let found = AtomicBool::new(false);
 
                 (0..h)
-                    .step_by(25)
+                    .step_by(5)
                     .collect::<Vec<usize>>()
                     .par_iter()
                     .any(|&y| {
@@ -274,9 +282,11 @@ fn main() -> Result<()> {
                                 return true;
                             }
 
-                            // У круга минимальный шаг 35. Рассчитывается как длина искомого элемента / 2 чтобы уж точно попасть на него
-                            let step = match search_state_line {
-                                LineSearchState::LookingForLightestCorner => 8,
+                            let step = match search_state_circle {
+                                CircleSearchState::LookingForOpeningGrayCircle => match search_state_line {
+                                    LineSearchState::LookingForLightestCorner => 8,
+                                    _ => 1,
+                                },
                                 _ => 1,
                             };
 
@@ -293,6 +303,8 @@ fn main() -> Result<()> {
                     thread::sleep(Duration::from_millis(30));
                     let _ = enigo.key(Key::Space, Direction::Release);
                 }
+
+                thread::sleep(Duration::from_millis(1));
             }
 
             Err(CaptureError::Timeout) => {
