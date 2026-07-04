@@ -205,6 +205,9 @@ fn main() -> Result<()> {
     .unwrap();
 
     let mut manager = DXGIManager::new(5)?;
+    let (w, h) = manager.geometry();
+
+    let it = (0..h).step_by(6).collect::<Vec<usize>>();
 
     println!("Ctrl+C to stop.");
 
@@ -213,7 +216,7 @@ fn main() -> Result<()> {
 
     while running.load(Ordering::SeqCst) {
         match manager.capture_frame() {
-            Ok((pixels, (w, h))) => {
+            Ok((pixels, _)) => {
                 i += 1;
 
                 if i % 30 == 0 {
@@ -229,7 +232,7 @@ fn main() -> Result<()> {
 
                     last_fired = None;
                 }
-
+                
                 let raw: &[u8] = unsafe {
                     std::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * 4)
                 };
@@ -242,11 +245,7 @@ fn main() -> Result<()> {
 
                 let found = AtomicBool::new(false);
 
-                (0..h)
-                    .step_by(5)
-                    .collect::<Vec<usize>>()
-                    .par_iter()
-                    .any(|&y| {
+                it.par_iter().any(|&y| {
                         if found.load(Ordering::Relaxed) {
                             return false;
                         }
@@ -300,11 +299,11 @@ fn main() -> Result<()> {
                     last_fired = Some(Instant::now());
 
                     let _ = enigo.key(Key::Space, Direction::Press);
-                    thread::sleep(Duration::from_millis(30));
+                    thread::sleep(Duration::from_millis(4));
                     let _ = enigo.key(Key::Space, Direction::Release);
                 }
 
-                thread::sleep(Duration::from_millis(1));
+                thread::sleep(Duration::from_millis(4));
             }
 
             Err(CaptureError::Timeout) => {
